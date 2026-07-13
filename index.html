@@ -80,9 +80,26 @@ section.block{margin-bottom:32px;}
   gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
 }
 .stat{background:var(--panel);padding:14px 16px;}
-.stat .label{font-size:11px;color:var(--ink-soft);margin-bottom:6px;}
+.stat .label{font-size:11px;color:var(--ink-soft);margin-bottom:6px;display:flex;align-items:center;gap:5px;}
 .stat .value{font-size:22px;font-weight:700;}
 .stat.remaining .value{color:var(--away);}
+
+.info-icon{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;
+  width:14px;height:14px;border-radius:50%;background:var(--line);color:var(--ink-soft);
+  font-size:10px;font-weight:700;cursor:help;flex-shrink:0;
+}
+.info-icon .tooltip-text{
+  visibility:hidden;opacity:0;position:absolute;bottom:135%;left:50%;transform:translateX(-50%);
+  background:var(--ink);color:#fff;text-align:center;padding:8px 10px;border-radius:5px;
+  font-size:11.5px;font-weight:400;line-height:1.4;width:190px;
+  transition:opacity 0.12s ease;pointer-events:none;z-index:10;
+}
+.info-icon .tooltip-text::after{
+  content:'';position:absolute;top:100%;left:50%;margin-left:-4px;
+  border:4px solid transparent;border-top-color:var(--ink);
+}
+.info-icon:hover .tooltip-text, .info-icon:focus .tooltip-text{visibility:visible;opacity:1;}
 
 /* ---------- Calendar ---------- */
 .calendar-wrap{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;}
@@ -174,7 +191,6 @@ section.block{margin-bottom:32px;}
     </header>
 
     <section class="block">
-      <h2>The year at a glance</h2>
       <div class="calendar-wrap">
         <div class="month-nav">
           <button id="prevMonthBtn" aria-label="Previous month">‹ Prev</button>
@@ -417,11 +433,11 @@ function renderSummary(){
     { label:'Compulsory', value:s.compulsory },
     { label:'Discretionary allowance', value:s.allowance },
     { label:'Used so far', value:s.used },
-    { label:'Remaining', value:s.totalRemaining, cls:'remaining' },
+    { label:'Remaining', value:s.totalRemaining, cls:'remaining', tooltip:'Includes leave already booked, not just leave taken so far.' },
   ];
   document.getElementById('summary').innerHTML = stats.map(st => `
     <div class="stat ${st.cls||''}">
-      <div class="label">${st.label}</div>
+      <div class="label">${st.label}${st.tooltip ? `<span class="info-icon" tabindex="0">i<span class="tooltip-text">${st.tooltip}</span></span>` : ''}</div>
       <div class="value mono">${st.value}</div>
     </div>
   `).join('');
