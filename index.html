@@ -230,16 +230,12 @@ const ENTITLEMENT = 26;
 const CALENDAR_ID = "b44996ca5f932126893edc93123fc4198d72abb3a56371d519442fc6bf5475bf@group.calendar.google.com";
 const API_KEY = "AIzaSyCzlOVlYFufg0SjTfGPUn6zUOAEIjD7L0s";
 
-/* Colour you set on each event in Google Calendar -> category here.
-   Set an event's colour via: open the event -> the colour swatch icon. */
-const COLOR_CATEGORY_MAP = {
-  '8':  'closed', // Graphite
-  '10': 'away',   // Basil
-  '5':  'booked', // Banana
-  '3':  'race',   // Grape
-  '7':  'trip',   // Peacock
-  '1':  'note',   // Lavender
-};
+/* Prefix an event's title in Google Calendar with one of these tags to set
+   its category — e.g. "[trip] Camping in Stonehaugh". The tag is stripped
+   back out before display. (Google's public Calendar API doesn't reliably
+   return colorId for anonymously-read public calendars, so a colour-based
+   convention isn't dependable here — a title tag always comes through.) */
+const CATEGORY_TAG = /^\s*\[(closed|away|booked|race|trip|note)\]\s*/i;
 
 /* Add "(provisional)" or "(half day)" to an event's title in Google
    Calendar to set those flags — this code strips the text back out. */
@@ -297,10 +293,12 @@ function mapGoogleEventToEntry(item){
     return null;
   }
   const rawTitle = item.summary || '(untitled)';
-  const provisional = PROVISIONAL_TAG.test(rawTitle);
-  const half = HALF_DAY_TAG.test(rawTitle);
-  const title = rawTitle.replace(PROVISIONAL_TAG, ' ').replace(HALF_DAY_TAG, ' ').trim();
-  const category = COLOR_CATEGORY_MAP[item.colorId] || 'note';
+  const tagMatch = rawTitle.match(CATEGORY_TAG);
+  const category = tagMatch ? tagMatch[1].toLowerCase() : 'note';
+  const titleNoTag = rawTitle.replace(CATEGORY_TAG, '');
+  const provisional = PROVISIONAL_TAG.test(titleNoTag);
+  const half = HALF_DAY_TAG.test(titleNoTag);
+  const title = titleNoTag.replace(PROVISIONAL_TAG, ' ').replace(HALF_DAY_TAG, ' ').trim();
 
   const entry = { from, to, category, title };
   if(item.description) entry.notes = item.description;
