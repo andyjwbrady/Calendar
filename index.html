@@ -23,6 +23,8 @@
   --race:#8449A6;
   --trip:#1E88C7;
   --note:#8A8578;
+  --considering:#1E9E96;
+  --alert:#B23A3A;
 
   --weekend:#F1F2EF;
   --radius:6px;
@@ -130,6 +132,12 @@ section.block{margin-bottom:32px;}
 .day-cell.cat-race{background:var(--race);color:#fff;border-color:var(--race);}
 .day-cell.cat-trip{background:var(--trip);color:#fff;border-color:var(--trip);}
 .day-cell.cat-note{background:var(--note);color:#fff;border-color:var(--note);}
+.day-cell.cat-considering{background:var(--considering);color:#fff;border-color:var(--considering);}
+.day-cell.price-alert::before{
+  content:'!';position:absolute;top:3px;right:5px;z-index:2;
+  width:14px;height:14px;border-radius:50%;background:var(--alert);color:#fff;
+  font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;
+}
 .day-cell.today{outline:2px solid var(--today);outline-offset:-1px;}
 .day-cell.provisional{border-style:dashed;border-width:1.5px;border-color:rgba(255,255,255,0.85);}
 .day-cell.half::after{content:'';position:absolute;top:0;left:0;right:50%;bottom:0;background:rgba(255,255,255,0.5);border-radius:4px 0 0 4px;}
@@ -151,6 +159,12 @@ section.block{margin-bottom:32px;}
 .upcoming .tag{font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:10px;color:#fff;white-space:nowrap;}
 .tag.cat-away{background:var(--away);} .tag.cat-booked{background:var(--booked);} .tag.cat-closed{background:var(--closed);}
 .tag.cat-race{background:var(--race);} .tag.cat-trip{background:var(--trip);} .tag.cat-note{background:var(--note);}
+.tag.cat-considering{background:var(--considering);}
+.price-alert-badge{
+  font-size:10.5px;font-weight:700;color:var(--alert);background:rgba(178,58,58,0.1);
+  padding:2px 8px;border-radius:10px;white-space:nowrap;
+}
+.price-line{font-size:12px;color:var(--ink-soft);margin-top:2px;}
 .empty-note{font-size:13px;color:var(--ink-soft);padding:14px;}
 
 .note{font-size:12.5px;color:var(--ink-soft);background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);padding:11px 14px;border-radius:0 var(--radius) var(--radius) 0;}
@@ -208,6 +222,8 @@ section.block{margin-bottom:32px;}
           <span><span class="swatch" style="background:var(--race)"></span>Race / event</span>
           <span><span class="swatch" style="background:var(--trip)"></span>Trip</span>
           <span><span class="swatch" style="background:var(--note)"></span>Note</span>
+          <span><span class="swatch" style="background:var(--considering)"></span>Considering</span>
+          <span><span class="swatch" style="background:var(--alert);border-radius:50%;width:9px;height:9px;"></span>Price rises soon</span>
           <span><span class="swatch" style="background:var(--weekend)"></span>Weekend</span>
           <span><span class="swatch" style="outline:2px solid var(--today);outline-offset:-2px;background:#fff"></span>Today</span>
           <span><span class="swatch" style="background:var(--away);border:1.5px dashed #fff"></span>Provisional</span>
@@ -253,7 +269,7 @@ const API_KEY = "AIzaSyCzlOVlYFufg0SjTfGPUn6zUOAEIjD7L0s";
    back out before display. (Google's public Calendar API doesn't reliably
    return colorId for anonymously-read public calendars, so a colour-based
    convention isn't dependable here — a title tag always comes through.) */
-const CATEGORY_TAG = /^\s*\[(closed|away|booked|race|trip|note)\]\s*/i;
+const CATEGORY_TAG = /^\s*\[(closed|away|booked|race|trip|note|considering)\]\s*/i;
 
 /* Add "(provisional)" or "(half day)" to an event's title in Google
    Calendar to set those flags — this code strips the text back out. */
@@ -263,10 +279,44 @@ const HALF_DAY_TAG = /\s*\(half day\)\s*/i;
 const YEAR = 2026;
 const CATEGORY_LABELS = {
   closed:'Office closed', away:'Away (leave)', booked:'Away (booked)',
-  race:'Race / event', trip:'Trip', note:'Note'
+  race:'Race / event', trip:'Trip', note:'Note', considering:'Considering'
 };
-const CATEGORY_PRIORITY = ['race','trip','note','closed','away','booked'];
+const CATEGORY_PRIORITY = ['race','trip','note','considering','closed','away','booked'];
 const LEAVE_CATEGORIES = ['closed','away','booked'];
+
+/* For [considering] events: put price tiers in the event's description as
+   PRICE@YYYY-MM-DD, comma-separated, one per tier, e.g.:
+   6@2026-07-14, 9@2026-07-29, 11@2026-08-01, 14@2026-08-02
+   Each price is valid up to and including its date; the last tier should
+   be the on-the-day price, dated the event day itself. */
+function parsePriceTiers(descriptionStr){
+  if(!descriptionStr) return [];
+  const matches = [...descriptionStr.matchAll(/(\d+(?:\.\d+)?)\s*@\s*(\d{4}-\d{2}-\d{2})/g)];
+  return matches
+    .map(m => ({ price: Number(m[1]), until: m[2] }))
+    .sort((a,b) => a.until.localeCompare(b.until));
+}
+
+// Given sorted tiers and today's date, find the currently-active price and
+// (if any) when it next rises and to what.
+function currentPriceInfo(tiers, todayStr){
+  if(!tiers || tiers.length === 0) return null;
+  let activeIndex = tiers.findIndex(t => todayStr <= t.until);
+  if(activeIndex === -1) activeIndex = tiers.length - 1; // past all tiers, use last
+  const active = tiers[activeIndex];
+  const next = tiers[activeIndex + 1] || null;
+  let daysUntilRise = null;
+  let riseDate = null;
+  if(next){
+    const riseDateObj = new Date(active.until + 'T00:00:00');
+    riseDateObj.setDate(riseDateObj.getDate() + 1);
+    riseDate = toLocalDateStr(riseDateObj);
+    const todayObj = new Date(todayStr + 'T00:00:00');
+    const riseObj = new Date(riseDate + 'T00:00:00');
+    daysUntilRise = Math.round((riseObj - todayObj) / 86400000);
+  }
+  return { price: active.price, nextPrice: next ? next.price : null, riseDate, daysUntilRise };
+}
 
 let EVENTS = [];
 let loadError = null;
@@ -319,11 +369,15 @@ function mapGoogleEventToEntry(item){
   const title = titleNoTag.replace(PROVISIONAL_TAG, ' ').replace(HALF_DAY_TAG, ' ').trim();
 
   const entry = { from, to, category, title };
-  if(item.description) entry.notes = item.description;
+  if(item.description && category !== 'considering') entry.notes = item.description;
   if(provisional) entry.provisional = true;
   if(half) entry.half = true;
   if(LEAVE_CATEGORIES.includes(category)){
     entry.days = (half && from === to) ? 0.5 : countWeekdays(from, to);
+  }
+  if(category === 'considering' && item.description){
+    const tiers = parsePriceTiers(item.description);
+    if(tiers.length > 0) entry.priceTiers = tiers;
   }
   return entry;
 }
@@ -417,6 +471,17 @@ function primaryCategoryForDate(dateStr){
   return entries[0];
 }
 
+// True if any "considering" entry active on this date has a price rise
+// within the next 7 days (checked relative to today, not the date itself).
+function hasPriceAlert(dateStr){
+  const todayStr = toLocalDateStr(new Date());
+  return entriesForDate(dateStr).some(e => {
+    if(e.category !== 'considering' || !e.priceTiers) return false;
+    const info = currentPriceInfo(e.priceTiers, todayStr);
+    return info && info.daysUntilRise !== null && info.daysUntilRise >= 0 && info.daysUntilRise <= 7;
+  });
+}
+
 // ---------- Leave summary ----------
 function computeLeaveSummary(){
   const compulsory = EVENTS.filter(e => e.category === 'closed').reduce((s,e) => s + (e.days||0), 0);
@@ -485,6 +550,7 @@ function renderCalendar(){
       cls += ` cat-${primary.category} has-event`;
       if(primary.half && primary.from === primary.to) cls += ' half';
       if(primary.provisional) cls += ' provisional';
+      if(hasPriceAlert(dateStr)) cls += ' price-alert';
       labelHtml = `<div class="day-label">${primary.title}</div>`;
       if(dayEntries.length > 1){
         moreHtml = `<div class="day-more">+${dayEntries.length - 1} more</div>`;
@@ -515,15 +581,34 @@ function renderUpcoming(){
     listEl.innerHTML = '<div class="empty-note">Nothing upcoming right now.</div>';
     return;
   }
-  listEl.innerHTML = upcoming.map(e => `
+  listEl.innerHTML = upcoming.map(e => {
+    let priceHtml = '';
+    let alertBadge = '';
+    if(e.category === 'considering' && e.priceTiers){
+      const info = currentPriceInfo(e.priceTiers, todayStr);
+      if(info){
+        const soon = info.daysUntilRise !== null && info.daysUntilRise >= 0 && info.daysUntilRise <= 7;
+        const riseLabel = info.nextPrice !== null
+          ? ` (rises to £${info.nextPrice} on ${new Date(info.riseDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short'})})`
+          : '';
+        priceHtml = `<span class="price-line">Current price: £${info.price}${riseLabel}</span>`;
+        if(soon) alertBadge = `<span class="price-alert-badge">Price rises in ${info.daysUntilRise === 0 ? 'today' : info.daysUntilRise + 'd'}</span>`;
+      }
+    }
+    return `
     <li data-date="${e.from}">
       <span class="left">
         <span class="name">${e.title}${e.provisional ? ' <em style="color:var(--ink-soft);font-style:italic;">(provisional)</em>' : ''}</span>
         <span class="dates">${fmtRange(e.from, e.to)}</span>
+        ${priceHtml}
       </span>
-      <span class="tag cat-${e.category}">${CATEGORY_LABELS[e.category] || e.category}</span>
+      <span style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;">
+        <span class="tag cat-${e.category}">${CATEGORY_LABELS[e.category] || e.category}</span>
+        ${alertBadge}
+      </span>
     </li>
-  `).join('');
+  `;
+  }).join('');
   listEl.querySelectorAll('li').forEach(li => {
     li.addEventListener('click', () => openModal(li.dataset.date));
   });
@@ -537,14 +622,29 @@ function openModal(dateStr){
   const card = document.getElementById('modalCard');
   card.innerHTML = `
     <h3>${dateLabel}</h3>
-    ${entries.map(e => `
+    ${entries.map(e => {
+      let priceBlock = '';
+      if(e.category === 'considering' && e.priceTiers){
+        const todayStr = toLocalDateStr(new Date());
+        const info = currentPriceInfo(e.priceTiers, todayStr);
+        if(info){
+          const soon = info.daysUntilRise !== null && info.daysUntilRise >= 0 && info.daysUntilRise <= 7;
+          const riseLabel = info.nextPrice !== null
+            ? `Rises to £${info.nextPrice} on ${new Date(info.riseDate+'T00:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}${soon ? ` <span class="price-alert-badge">${info.daysUntilRise === 0 ? 'today' : info.daysUntilRise + 'd'}</span>` : ''}`
+            : `On-the-day price`;
+          priceBlock = `<div class="entry-notes">Current price: <strong>£${info.price}</strong><br>${riseLabel}</div>`;
+        }
+      }
+      return `
       <div class="modal-entry">
         <span class="tag cat-${e.category}">${CATEGORY_LABELS[e.category] || e.category}</span>
         <div class="entry-title">${e.title}${e.provisional ? ' — provisional' : ''}</div>
         <div class="modal-date mono">${fmtRange(e.from, e.to)}</div>
         ${e.notes ? `<div class="entry-notes">${e.notes}</div>` : ''}
+        ${priceBlock}
       </div>
-    `).join('')}
+    `;
+    }).join('')}
     <button class="modal-close" id="modalCloseBtn">Close</button>
   `;
   document.getElementById('modalOverlay').style.display = 'flex';
